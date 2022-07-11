@@ -1,0 +1,98 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using Shared
+
+@inject NavigationManager NavigationManager
+@implements IDisposable
+
+<PageTitle>Index</PageTitle>
+
+<h1>SignalR Tab Disconnect Test</h1>
+
+SignalR should be able to detect the following circumstances (as it does in other implementations):
+
+<ul>
+    <li>Tab Close Event - WORKS</li>
+    <li>Tab URL manually changed (navigate away to google, for example)</li>
+</ul>
+
+<h2>Connected?: @IsConnected.ToString() = @userCount </h2>
+
+@code 
+{
+    private HubConnection? hubConnection;
+    public bool IsConnected => hubConnection?.State == HubConnectionState.Connected;
+    public int userCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/roomhub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        hubConnection.Closed += CloseHandler;
+        
+        NavigationManager.LocationChanged += LocationChanged; // This only seems to happen when NavigationManager.NavigateTo is called from a button/link
+
+
+        hubConnection.On<int>("UserCountChanged", (inUserCount) =>
+        {
+            userCount = inUserCount;
+            InvokeAsync(StateHasChanged);
+        });
+
+        await hubConnection.StartAsync();
+
+    }
+
+
+
+
+    void LocationChanged(object sender, LocationChangedEventArgs e)
+    {
+        string navigationMethod = e.IsNavigationIntercepted ? "HTML" : "code";
+        System.Diagnostics.Debug.WriteLine($"Notified of navigation via {navigationMethod} to {e.Location}");
+    }
+
+    private Task CloseHandler(Exception exception)
+    {
+        if (exception == null)
+        {
+            Console.WriteLine("signalR client connection closed");
+        }
+        else
+        {
+            Console.WriteLine($"signalR client closed due to error => {exception.Message}");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= LocationChanged;
+        Console.WriteLine("Dispose...");
+        hubConnection.DisposeAsync();
+    }
+
+    public async virtual ValueTask DisposeAsync()
+    {
+        try
+        {
+            NavigationManager.LocationChanged -= LocationChanged;
+
+            if (hubConnection != null)
+            {
+                Console.WriteLine("Closing secondary signalR connection...");
+                await hubConnection.StopAsync();
+                Console.WriteLine("Closed secondary signalR connection");
+            }
+            // Dispose(); When migrated to ASP.NET Core 5 let DisposeAsync trigger Dispose
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"Exception encountered wwhile stopping secondary signalR connection :: {exception.Message}");
+        }
+    }
+}
